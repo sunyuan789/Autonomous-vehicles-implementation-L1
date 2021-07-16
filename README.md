@@ -31,11 +31,10 @@ Vehicle hardware information:
 
 ### PC
 
-1. ROS Serial Communication
+1. [STM32和ROS noetic串口通信](https://github.com/sunyuan789/Autonomous-vehicles-implementation-L1/tree/main/usart)**USART**功能包要配合**serial-master**功能包一起使用，实际上就是noetic-serial功能包，但是使用sudo install的方式并不能从官网直接下载，因此需要从github源码上直接使用。
 
 ### PLC
 
-1. [STM32和ROS noetic串口通信](https://github.com/sunyuan789/Autonomous-vehicles-implementation-L1/tree/main/usart)**USART**功能包要配合**serial-master**功能包一起使用，实际上就是noetic-serial功能包，但是使用sudo install的方式并不能从官网直接下载，因此需要从github源码上直接使用。
 
 
 
