@@ -6,6 +6,8 @@ import cv2
 import numpy as np
 import warnings
 
+import objtracker
+import sympy
 import os
 
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
@@ -13,6 +15,13 @@ os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 # 加载本地YoloV5模型
 # model = torch.hub.load('ultralytics/yolov5', 'yolov5s')
 model = torch.hub.load('yolov5', 'custom', path='yolov5/yolov5s.pt', source='local')
+
+
+def progress_bar(percent_done, bar_length=50):
+    done_length = int(bar_length * percent_done / 100)
+    bar = '=' * done_length + '-' * (bar_length - done_length)
+    sys.stdout.write('[%s] %f%s\r' % (bar, percent_done, '%'))
+    sys.stdout.flush()
 
 
 # 绘制带背景的文字
@@ -53,6 +62,21 @@ def distance(mat, xmin, ymin, xmax, ymax):
     width = xmax - xmin
     distances = pix_distance(height, width, xmin, ymin, mat)
     return distances
+
+
+# 人距离车辆的真实距离
+def abs_distance(mat, xmin, ymin, xmax, ymax, distances):
+    height = int((ymax - ymin) / 2)
+    width = xmax - xmin
+    h = 235  # 车辆摄像机距离地面的高度
+    d1 = pix_distance(height, width, xmin, ymin, mat)
+    d2 = pix_distance(height, width, xmin, ymin + height, mat)
+    a = np.square(d1) - np.square(d2)
+    x = sympy.Symbol('x')
+    out = sympy.solve([x * x - 2 * x * h + a], [x])
+    c3 = out[x]
+    d = np.sqrt(np.square(distances) - np.square(h) - 0.25 * a + 0.5*h*c3)
+    return d
 
 
 # 定义检测框的信息类
@@ -134,10 +158,13 @@ def main():
     key = ''
     fourcc = cv2.VideoWriter_fourcc('X', 'V', 'I', 'D')
     output = cv2.VideoWriter('output.avi', fourcc, 30, (1920, 1080))
+
+    nb_frames = camera.get_svo_number_of_frames()
     # 按下q键就可以退出
     while key != 113:
         err = camera.grab(runtime)
         if err == sl.ERROR_CODE.SUCCESS:
+            svo_position = camera.get_svo_position()
             # 获取RGBA图像和深度图像
             camera.retrieve_image(image_rgb, sl.VIEW.LEFT, sl.MEM.CPU, image_size)
             camera.retrieve_image(image_depth_display, sl.VIEW.DEPTH)
@@ -145,28 +172,34 @@ def main():
             # 定义获取图像信息类
             rgb = Objection(image_rgb)
             depth = Objection(image_depth_display)
-            if rgb.img is not None:
+            list_bboxs = []
+            # 更新跟踪器
+            output_image_frame, list_bboxs = objtracker.update(rgb)
 
-                for i in range(rgb.results.shape[0]):
-                    # 绘制检测框
-                    if rgb.value().name[i] == 'person':
-                        gap = distance(image_depth,
-                                       rgb.value().xmin[i], rgb.value().ymin[i],
-                                       rgb.value().xmax[i], rgb.value().ymax[i])
-                        cv2.rectangle(rgb.img,
-                                      (rgb.value().xmin[i], rgb.value().ymin[i]),
-                                      (rgb.value().xmax[i], rgb.value().ymax[i]),
-                                      (0, 255, 0), 1, 4)
-                        # 打标签类别
-                        # + str(round(rgb.value().confidence[i], 2))
-                        draw_text(img=rgb.img,
-                                  text=rgb.value().name[i] + str(round(gap, 2)),
-                                  pos=(rgb.value().xmin[i], rgb.value().ymin[i]))
-                cv2.imshow('rgb', rgb.img)
-                cv2.imshow('depth', depth.img)
-                output.write(rgb.img)
-                key = cv2.waitKey(10)
-            else:
+            for i in range(rgb.results.shape[0]):
+                # 绘制检测框
+                if rgb.value().name[i] == 'person':
+                    gap = distance(image_depth,
+                                   rgb.value().xmin[i], rgb.value().ymin[i],
+                                   rgb.value().xmax[i], rgb.value().ymax[i])
+                    cv2.rectangle(rgb.img,
+                                  (rgb.value().xmin[i], rgb.value().ymin[i]),
+                                  (rgb.value().xmax[i], rgb.value().ymax[i]),
+                                  (0, 255, 0), 1, 4)
+                    # 打标签类别
+                    # + str(round(rgb.value().confidence[i], 2))
+                    draw_text(img=rgb.img,
+                              text=rgb.value().name[i] + str(round(gap, 2)),
+                              pos=(rgb.value().xmin[i], rgb.value().ymin[i]))
+            cv2.imshow('rgb', rgb.img)
+            cv2.imshow('depth', depth.img)
+            output.write(rgb.img)
+            key = cv2.waitKey(10)
+
+            progress_bar((svo_position + 1) / nb_frames * 100, 30)
+            # 读取到视频文件的最后一帧就退出程序
+            if svo_position >= (nb_frames - 1):  # End of SVO
+                sys.stdout.write("\nSVO end has been reached. Exiting now.\n")
                 break
     output.release()
     cv2.destroyAllWindows()
