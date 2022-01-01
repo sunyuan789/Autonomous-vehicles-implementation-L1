@@ -2,5 +2,5 @@
 
 [双目相机行人目标检测与测距_哔哩哔哩_bilibili](https://www.bilibili.com/video/BV1mS4y1D7Hp#reply96985235184)
 
-https://github.com/sunyuan789/Autonomous-vehicles-implementation-L1/blob/main/objection/demo.png
+![](https://github.com/sunyuan789/Autonomous-vehicles-implementation-L1/blob/main/objection/demo.png)
 
