@@ -7,14 +7,13 @@ import numpy as np
 import warnings
 
 import objtracker
-import sympy
 import os
 
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
 # 加载本地YoloV5模型
 # model = torch.hub.load('ultralytics/yolov5', 'yolov5s')
-model = torch.hub.load('yolov5', 'custom', path='yolov5/yolov5s.pt', source='local')
+model = torch.hub.load('yolov5', 'custom', path='yolov5/weight/best_epochs50.pt', source='local')
 
 
 def progress_bar(percent_done, bar_length=50):
@@ -65,18 +64,33 @@ def distance(mat, xmin, ymin, xmax, ymax):
 
 
 # 人距离车辆的真实距离
-def abs_distance(mat, xmin, ymin, xmax, ymax, distances):
+def abs_distance(mat, xmin, ymin, xmax, ymax):
     height = int((ymax - ymin) / 2)
     width = xmax - xmin
-    h = 235  # 车辆摄像机距离地面的高度
+    h = 2.35  # 车辆摄像机距离地面的高度
+    d2 = pix_distance(height, width, xmin, ymin + height, mat)
+    if d2 > h:
+        d = np.sqrt(np.square(d2) - np.square(h))
+    else:
+        d = np.nan
+    return d
+
+
+# 行人高度，代码暂时有问题
+def human_height(mat, xmin, ymin, xmax, ymax):
+    height = int((ymax - ymin) / 2)
+    width = xmax - xmin
+    h = 2.35  # 车辆摄像机距离地面的高度
     d1 = pix_distance(height, width, xmin, ymin, mat)
     d2 = pix_distance(height, width, xmin, ymin + height, mat)
-    a = np.square(d1) - np.square(d2)
-    x = sympy.Symbol('x')
-    out = sympy.solve([x * x - 2 * x * h + a], [x])
-    c3 = out[x]
-    d = np.sqrt(np.square(distances) - np.square(h) - 0.25 * a + 0.5*h*c3)
-    return d
+    delta = np.sqrt(np.square(h) - np.square(d2) + np.square(d1))
+    if delta > 0:
+        d1 = h + delta if h + delta > 0 else 0
+        d2 = h - delta if h + delta > 0 else 0
+        d = d1 if d1 < d2 else d2
+    else:
+        d = np.nan
+    return d if d > 0 else 0
 
 
 # 定义检测框的信息类
@@ -156,8 +170,10 @@ def main():
     image_depth = sl.Mat()
 
     key = ''
-    fourcc = cv2.VideoWriter_fourcc('X', 'V', 'I', 'D')
-    output = cv2.VideoWriter('output.avi', fourcc, 30, (1920, 1080))
+    output = cv2.VideoWriter('output1.avi',
+                             cv2.VideoWriter_fourcc('X', 'V', 'I', 'D'),
+                             max(camera.get_camera_information().camera_fps, 30),
+                             (1920, 1080))
 
     nb_frames = camera.get_svo_number_of_frames()
     # 按下q键就可以退出
@@ -179,13 +195,19 @@ def main():
             for i in range(rgb.results.shape[0]):
                 # 绘制检测框
                 if rgb.value().name[i] == 'person':
-                    gap = distance(image_depth,
+                    # gap = distance(image_depth,
+                    #                rgb.value().xmin[i], rgb.value().ymin[i],
+                    #                rgb.value().xmax[i], rgb.value().ymax[i])
+                    gap = abs_distance(image_depth,
                                    rgb.value().xmin[i], rgb.value().ymin[i],
                                    rgb.value().xmax[i], rgb.value().ymax[i])
-                    cv2.rectangle(rgb.img,
-                                  (rgb.value().xmin[i], rgb.value().ymin[i]),
-                                  (rgb.value().xmax[i], rgb.value().ymax[i]),
-                                  (0, 255, 0), 1, 4)
+                    # gap = human_height(image_depth,
+                    #                rgb.value().xmin[i], rgb.value().ymin[i],
+                    #                rgb.value().xmax[i], rgb.value().ymax[i])
+                    # cv2.rectangle(rgb.img,
+                    #               (rgb.value().xmin[i], rgb.value().ymin[i]),
+                    #               (rgb.value().xmax[i], rgb.value().ymax[i]),
+                    #               (0, 255, 0), 1, 4)
                     # 打标签类别
                     # + str(round(rgb.value().confidence[i], 2))
                     draw_text(img=rgb.img,
