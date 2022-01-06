@@ -4,6 +4,8 @@
 
 ![](https://github.com/sunyuan789/Autonomous-vehicles-implementation-L1/blob/main/objection/demo.png)
 
+**仓库中不知道为什么不能够上传`Easydirc`这个模块，需要各位自己手动下载安装**
+
 ## **2022.1.5**
 
 **YOLOV5.py**增加了目标跟踪的代码，借鉴了网络上已有的deepsort模型代码，可实现对行人的目标跟踪
