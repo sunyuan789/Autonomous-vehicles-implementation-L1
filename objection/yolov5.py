@@ -1,19 +1,13 @@
 import sys
-
-import torch
-import pyzed.sl as sl
 import cv2
-import numpy as np
-import warnings
-
 import objtracker
+from distance import *
+from objection import *
 import os
 
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
-# 加载本地YoloV5模型
-# model = torch.hub.load('ultralytics/yolov5', 'yolov5s')
-model = torch.hub.load('yolov5', 'custom', path='yolov5/weight/best_epochs50.pt', source='local')
+save_txt = True  # 是否将跟踪对象写入txt
 
 
 def progress_bar(percent_done, bar_length=50):
@@ -40,99 +34,6 @@ def draw_text(img, text,
                 font_scale, text_color, font_thickness)
 
     return text_size
-
-
-# 指定检测框长宽左上角坐标的检测框距离
-def pix_distance(height, width, xmin, ymin, mat):
-    data = np.full((height, width), np.nan)
-    for i in range(height):
-        for j in range(width):
-            a = mat.get_value(xmin + i, ymin + j)
-            if a[0] == sl.ERROR_CODE.SUCCESS and np.isfinite(a[1]):
-                data[i, j] = a[1]
-    warnings.simplefilter("ignore", category=RuntimeWarning)
-    distances = np.nanmin(data)
-    return distances
-
-
-# 整个检测框的距离
-def distance(mat, xmin, ymin, xmax, ymax):
-    height = ymax - ymin
-    width = xmax - xmin
-    distances = pix_distance(height, width, xmin, ymin, mat)
-    return distances
-
-
-# 人距离车辆的真实距离
-def abs_distance(mat, xmin, ymin, xmax, ymax):
-    height = int((ymax - ymin) / 2)
-    width = xmax - xmin
-    h = 2.35  # 车辆摄像机距离地面的高度
-    d2 = pix_distance(height, width, xmin, ymin + height, mat)
-    if d2 > h:
-        d = np.sqrt(np.square(d2) - np.square(h))
-    else:
-        d = np.nan
-    return d
-
-
-# 行人高度，代码暂时有问题
-def human_height(mat, xmin, ymin, xmax, ymax):
-    height = int((ymax - ymin) / 2)
-    width = xmax - xmin
-    h = 2.35  # 车辆摄像机距离地面的高度
-    d1 = pix_distance(height, width, xmin, ymin, mat)
-    d2 = pix_distance(height, width, xmin, ymin + height, mat)
-    delta = np.sqrt(np.square(h) - np.square(d2) + np.square(d1))
-    if delta > 0:
-        d1 = h + delta if h + delta > 0 else 0
-        d2 = h - delta if h + delta > 0 else 0
-        d = d1 if d1 < d2 else d2
-    else:
-        d = np.nan
-    return d if d > 0 else 0
-
-
-# 定义检测框的信息类
-class Value:
-    def __init__(self, xmin, xmax, ymin, ymax, name, confidence):
-        self.xmin = xmin
-        self.xmax = xmax
-        self.ymin = ymin
-        self.ymax = ymax
-        self.name = name
-        self.confidence = confidence
-
-
-# 获取ZED相机的图像数据，删除第3维，并将其copy
-class Image:
-    def __init__(self, image_mat):
-        image_ocv = image_mat.get_data()
-        image = np.delete(image_ocv, -1, axis=2)
-        self.img = image.copy()
-
-
-# 输出检测目标物
-class Objection(Image):
-    def __init__(self, image_mat):
-        super().__init__(image_mat)
-        result = model(self.img, size=640)
-        self.results = result.pandas().xyxy[0]
-
-    # 获取原始图像
-    def image(self):
-        return self.img
-
-    # 得到检测框的信息xmin, xmax, ymin, ymax, name, confidence
-    def value(self):
-        xmin = self.results['xmin'].values.astype(int)
-        ymin = self.results['ymin'].values.astype(int)
-        xmax = self.results['xmax'].values.astype(int)
-        ymax = self.results['ymax'].values.astype(int)
-        name = self.results['name'].values
-        confidence = self.results['confidence'].values
-        result = Value(xmin, xmax, ymin, ymax, name, confidence)
-        return result
 
 
 def main():
@@ -176,6 +77,8 @@ def main():
                              (1920, 1080))
 
     nb_frames = camera.get_svo_number_of_frames()
+    fw = open('test.txt', 'w+')
+
     # 按下q键就可以退出
     while key != 113:
         err = camera.grab(runtime)
@@ -190,7 +93,7 @@ def main():
             depth = Objection(image_depth_display)
             list_bboxs = []
             # 更新跟踪器
-            output_image_frame, list_bboxs = objtracker.update(rgb)
+            output_image_frame, list_bboxs = objtracker.update(rgb, image_depth)
 
             for i in range(rgb.results.shape[0]):
                 # 绘制检测框
@@ -199,8 +102,8 @@ def main():
                     #                rgb.value().xmin[i], rgb.value().ymin[i],
                     #                rgb.value().xmax[i], rgb.value().ymax[i])
                     gap = abs_distance(image_depth,
-                                   rgb.value().xmin[i], rgb.value().ymin[i],
-                                   rgb.value().xmax[i], rgb.value().ymax[i])
+                                       rgb.value().xmin[i], rgb.value().ymin[i],
+                                       rgb.value().xmax[i], rgb.value().ymax[i])
                     # gap = human_height(image_depth,
                     #                rgb.value().xmin[i], rgb.value().ymin[i],
                     #                rgb.value().xmax[i], rgb.value().ymax[i])
@@ -209,7 +112,6 @@ def main():
                     #               (rgb.value().xmax[i], rgb.value().ymax[i]),
                     #               (0, 255, 0), 1, 4)
                     # 打标签类别
-                    # + str(round(rgb.value().confidence[i], 2))
                     draw_text(img=rgb.img,
                               text=rgb.value().name[i] + str(round(gap, 2)),
                               pos=(rgb.value().xmin[i], rgb.value().ymin[i]))
@@ -217,7 +119,16 @@ def main():
             cv2.imshow('depth', depth.img)
             output.write(rgb.img)
             key = cv2.waitKey(10)
-
+            # 将跟踪的ID坐标数据写入txt文档
+            if save_txt:
+                a = list(list_bboxs)
+                for line in a:
+                    for x in line:
+                        fw.write(str(x))
+                        fw.write('\t')
+                    fw.write(str(svo_position))
+                    fw.write('\n')
+            # 显示当前进度
             progress_bar((svo_position + 1) / nb_frames * 100, 30)
             # 读取到视频文件的最后一帧就退出程序
             if svo_position >= (nb_frames - 1):  # End of SVO
@@ -226,6 +137,7 @@ def main():
     output.release()
     cv2.destroyAllWindows()
     camera.close()
+    fw.close()
     print("Finish")
 
 
